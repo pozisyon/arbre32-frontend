@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Styles custom du thème */
+.card-smooth {
+  @apply rounded-xl bg-gray-100 dark:bg-[#1f2124] shadow-md border border-gray-200 dark:border-[#2a2b2f];
+}
+
+.bg-brand-600 {
+  @apply bg-blue-600;
+}
+.bg-brand-700 {
+  @apply bg-blue-700;
+}
+
