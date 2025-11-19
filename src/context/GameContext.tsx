@@ -11,7 +11,8 @@ interface GameContextValue {
   initNewGame: (mode: 32 | 52) => Promise<void>;
   joinGame: (id: string) => Promise<void>;
   loadGame: (id: string) => Promise<void>;
-  play: (cardId: string, playerId: string) => Promise<void>;
+  // 🔥 plus besoin de playerId côté frontend
+  play: (cardId: string) => Promise<void>;
 }
 
 const GameContext = createContext<GameContextValue | undefined>(undefined);
@@ -23,10 +24,14 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const { user } = useAuthStore();
 
+  // --------------------------------------------
+  // CREATE NEW GAME
+  // --------------------------------------------
   const initNewGame = useCallback(
     async (mode: 32 | 52) => {
       const id = await GameApi.createGame(mode);
       const state = await GameApi.getState(id);
+
       setGameId(id);
       setGame(state);
       navigate(`/game/${id}`);
@@ -34,6 +39,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     [navigate]
   );
 
+  // --------------------------------------------
+  // LOAD GAME
+  // --------------------------------------------
   const loadGame = useCallback(
     async (id: string) => {
       const state = await GameApi.getState(id);
@@ -44,26 +52,43 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     [navigate]
   );
 
+  // --------------------------------------------
+  // JOIN GAME
+  // --------------------------------------------
   const joinGame = useCallback(
     async (id: string) => {
-      const res = await api.post(`/api/game/${id}/join`, {
-        playerId: user.handle,   // on envoie bien le handle côté backend
+      // on envoie encore playerId pour respecter la signature, 
+      // mais en B2 le backend s'en fiche et force "J1"/"J2"
+      await api.post(`/api/game/${id}/join`, {
+        playerId: user?.email ?? "anonymous",
       });
 
+      const state = await GameApi.getState(id);
       setGameId(id);
-      setGame(res.data);
+      setGame(state);
       navigate(`/game/${id}`);
     },
     [navigate, user]
   );
 
+  // --------------------------------------------
+  // PLAY CARD (B2 : playerId = game.turnPlayer)
+  // --------------------------------------------
   const play = useCallback(
-    async (cardId: string, playerId: string) => {
-      if (!gameId) return;
+    async (cardId: string) => {
+      if (!gameId || !game) return;
+
+      const playerId = game.turnPlayer; // "J1" ou "J2" envoyé par le backend
+
+      if (!playerId) {
+        console.error("Impossible de déterminer le joueur courant (turnPlayer null).");
+        return;
+      }
+
       const updated = await GameApi.playCard(gameId, cardId, playerId);
       setGame(updated);
     },
-    [gameId]
+    [gameId, game]
   );
 
   return (
@@ -82,6 +107,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
+// --------------------------------------------
+// HOOK
+// --------------------------------------------
 export function useGame() {
   const ctx = useContext(GameContext);
   if (!ctx) throw new Error("useGame must be used within GameProvider");

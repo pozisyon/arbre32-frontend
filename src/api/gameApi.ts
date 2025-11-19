@@ -13,12 +13,17 @@ export interface CardDTO {
 
 export interface GameDTO {
   gameId: string;
-  board: CardDTO[][];
-  score: { player1: number; player2: number };
-  turnPlayer: string;
+  turnPlayer: string;     // "J1" ou "J2"
   turnIndex: number;
-  maxDepth: number;
   rootLocked: boolean;
+  maxDepth: number;
+
+  // Champ dispo mais plus utilisé pour déterminer qui est qui en B2
+  humanP1: string | null;
+  humanP2: string | null;
+
+  score: { player1: number; player2: number };
+  board: CardDTO[][];
 }
 
 export const GameApi = {
@@ -32,17 +37,16 @@ export const GameApi = {
     return res.data;
   },
 
-  async playCard(gameId: string, cardId: string, playerId: string): Promise<GameDTO> {
+  async playCard(
+    gameId: string,
+    cardId: string,
+    playerId: string
+  ): Promise<GameDTO> {
     const res = await api.post<GameDTO>(`/api/game/${gameId}/play`, {
       cardId,
-      playerId,
+      playerId,    // "J1" ou "J2" → le backend fait le contrôle "Not your turn"
     });
     return res.data;
-  },
-
-  async listWaiting() {
-    const res = await api.get("/api/game/open");
-    return res.data as { id: string }[];
   },
 };
 
