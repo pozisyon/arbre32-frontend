@@ -1,63 +1,113 @@
-import { Client } from "@stomp/stompjs";
-import React, { createContext, useContext, useEffect, useRef, useState } from "react";
+// src/context/ChatContext.tsx
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+  useRef,
+} from "react";
 
-interface Message {
+import SockJS from "sockjs-client";
+import { Client } from "@stomp/stompjs";
+
+interface ChatMessage {
   sender: string;
   content: string;
+  ts: number;
 }
 
 interface ChatContextValue {
-  messages: Message[];
-  connect: (gameId: string, sender: string) => void;
-  send: (msg: string) => void;
+  messages: ChatMessage[];
+  connect: (gameId: string) => void;
+  send: (gameId: string, msg: ChatMessage) => void;
 }
 
-const ChatContext = createContext<ChatContextValue | null>(null);
+const ChatContext = createContext<ChatContextValue | undefined>(undefined);
 
-export const ChatProvider = ({ children }: { children: React.ReactNode }) => {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const clientRef = useRef<Client | null>(null);
-  const gameIdRef = useRef<string>("");
-  const senderRef = useRef<string>("");
+export function ChatProvider({ children }: { children: React.ReactNode }) {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const stompRef = useRef<Client | null>(null);
+  const currentGameRef = useRef<string | null>(null);
 
-  const connect = (gameId: string, sender: string) => {
-    gameIdRef.current = gameId;
-    senderRef.current = sender;
+  // ============================
+  //  CONNECT
+  // ============================
+  const connect = useCallback((gameId: string) => {
+    // ⛔ Ne pas reconnecter si déjà sur la même partie
+    if (currentGameRef.current === gameId) return;
+
+    currentGameRef.current = gameId;
+    setMessages([]); // reset chat pour nouvelle partie
+
+    // 🔌 Déconnecter proprement l’ancienne connexion
+    if (stompRef.current) {
+      stompRef.current.deactivate();
+      stompRef.current = null;
+    }
+
+    // ✔️ Créer une seule connexion
+    const sock = new SockJS("http://localhost:8080/ws");
 
     const client = new Client({
-      brokerURL: "ws://localhost:8080/ws",
-      reconnectDelay: 500,
+      webSocketFactory: () => sock as any,
+      reconnectDelay: 5000,
       debug: () => {},
-      onConnect: () => {
-        client.subscribe(`/topic/chat/${gameId}`, (msg) => {
-          const body = JSON.parse(msg.body);
-          setMessages((m) => [...m, body]);
-        });
-      },
     });
+
+    client.onConnect = () => {
+      client.subscribe(`/topic/chat/${gameId}`, (msg) => {
+        const payload = JSON.parse(msg.body);
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            sender: payload.from,
+            content: payload.message,
+            ts: Date.now(),
+          },
+        ]);
+      });
+    };
 
     client.activate();
-    clientRef.current = client;
-  };
+    stompRef.current = client;
+  }, []);
 
-  const send = (content: string) => {
-    if (!clientRef.current || !clientRef.current.connected) return;
-
-    clientRef.current.publish({
-      destination: `/app/chat/${gameIdRef.current}`,
+  // ============================
+  //  SEND
+  // ============================
+  const send = useCallback(async (gameId: string, msg: ChatMessage) => {
+    await fetch("http://localhost:8080/api/chat/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        sender: senderRef.current,
-        content,
+        gameId,
+        from: msg.sender,
+        message: msg.content,
       }),
     });
-  };
+  }, []);
+
+  // ============================
+  //  CLEANUP POUR REACT
+  // ============================
+  useEffect(() => {
+    return () => {
+      if (stompRef.current) stompRef.current.deactivate();
+    };
+  }, []);
 
   return (
     <ChatContext.Provider value={{ messages, connect, send }}>
       {children}
     </ChatContext.Provider>
   );
-};
+}
 
-export const useChat = () => useContext(ChatContext)!;
+export function useChat() {
+  const ctx = useContext(ChatContext);
+  if (!ctx) throw new Error("useChat must be used within ChatProvider");
+  return ctx;
+}
 

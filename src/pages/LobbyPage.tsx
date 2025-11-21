@@ -2,17 +2,33 @@
 import { useEffect, useState } from "react";
 import { useGame } from "../context/GameContext";
 import { api } from "../api/http";
+import { useSearchParams } from "react-router-dom";
 
 interface OpenGame {
   id: string;
+  players?: number;
+  status?: string;
 }
 
 export default function LobbyPage() {
   const { initNewGame, joinGame } = useGame();
+
   const [waiting, setWaiting] = useState<OpenGame[]>([]);
   const [loading, setLoading] = useState(false);
   const [manualId, setManualId] = useState("");
 
+  // Pour récupérer ?new=xxxx depuis l’URL
+  const [params] = useSearchParams();
+
+  // ----- PRÉ-REMPLIR L’ID APRÈS CRÉATION -----
+  useEffect(() => {
+    const newId = params.get("new");
+    if (newId) {
+      setManualId(newId);
+    }
+  }, [params]);
+
+  // ----- LOAD OPEN GAMES -----
   useEffect(() => {
     const load = async () => {
       try {
@@ -32,7 +48,7 @@ export default function LobbyPage() {
     if (!id) return;
     setLoading(true);
     try {
-      await joinGame(id);   // 🟢 joinGame fait tout (POST + navigate)
+      await joinGame(id); // navigate est déjà dedans
     } catch (e) {
       console.error("Erreur join:", e);
     } finally {
@@ -42,7 +58,6 @@ export default function LobbyPage() {
 
   return (
     <div className="p-6 space-y-8 max-w-xl mx-auto">
-
       <h1 className="text-2xl font-bold mb-4">Lobby</h1>
 
       {/* CRÉATION */}
@@ -50,9 +65,26 @@ export default function LobbyPage() {
         <h2 className="text-lg font-semibold">Créer une nouvelle partie</h2>
 
         <div className="flex gap-3">
-          <button onClick={() => initNewGame(32)} className="btn-primary">32 cartes</button>
-          <button onClick={() => initNewGame(52)} className="btn-secondary">52 cartes</button>
+          <button
+            onClick={() => initNewGame(32)}
+            className="btn-primary"
+          >
+            32 cartes
+          </button>
+
+          <button
+            onClick={() => initNewGame(52)}
+            className="btn-secondary"
+          >
+            52 cartes
+          </button>
         </div>
+
+        {manualId && (
+          <div className="text-xs opacity-70">
+            Partie créée : ID <b>{manualId}</b> — vous devez la rejoindre.
+          </div>
+        )}
       </div>
 
       {/* JOIN VIA ID */}
@@ -85,10 +117,15 @@ export default function LobbyPage() {
 
         <div className="space-y-2">
           {waiting.map((g) => (
-            <div key={g.id} className="border rounded p-3 flex justify-between items-center">
+            <div
+              key={g.id}
+              className="border rounded p-3 flex justify-between items-center"
+            >
               <div>
                 <div className="font-medium">Partie {g.id}</div>
-                <div className="text-xs opacity-70">En attente d'un joueur…</div>
+                <div className="text-xs opacity-70">
+                  En attente d'un joueur…
+                </div>
               </div>
 
               <button
@@ -102,7 +139,6 @@ export default function LobbyPage() {
           ))}
         </div>
       </div>
-
     </div>
   );
 }

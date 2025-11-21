@@ -1,5 +1,10 @@
-// src/api/gameApi.ts
 import { api } from "./http";
+
+export interface PlayerDTO {
+  id: string;
+  name: string;
+  score: number;
+}
 
 export interface CardDTO {
   id: string;
@@ -13,23 +18,22 @@ export interface CardDTO {
 
 export interface GameDTO {
   gameId: string;
-  turnPlayer: string;     // "J1" ou "J2"
-  turnIndex: number;
   rootLocked: boolean;
+  turnIndex: number;
+  currentPlayer: string | null;
+  players: PlayerDTO[];
   maxDepth: number;
-
-  // Champ dispo mais plus utilisé pour déterminer qui est qui en B2
-  humanP1: string | null;
-  humanP2: string | null;
-
-  score: { player1: number; player2: number };
   board: CardDTO[][];
 }
 
+
+
+
 export const GameApi = {
-  async createGame(mode: 32 | 52): Promise<string> {
-    const res = await api.post<{ gameId: string }>("/api/game/create", { mode });
-    return res.data.gameId;
+  // le backend renvoie déjà tout le GameDTO
+  async createGame(mode: 32 | 52): Promise<GameDTO> {
+    const res = await api.post<GameDTO>("/api/game/create", { mode });
+    return res.data;
   },
 
   async getState(gameId: string): Promise<GameDTO> {
@@ -37,16 +41,22 @@ export const GameApi = {
     return res.data;
   },
 
+  async joinGame(gameId: string, userHandle: string): Promise<GameDTO> {
+    const res = await api.post<GameDTO>(`/api/game/${gameId}/join`, {
+      userHandle,
+    });
+    return res.data;
+  },
+
   async playCard(
     gameId: string,
     cardId: string,
-    playerId: string
+    userHandle: string
   ): Promise<GameDTO> {
     const res = await api.post<GameDTO>(`/api/game/${gameId}/play`, {
       cardId,
-      playerId,    // "J1" ou "J2" → le backend fait le contrôle "Not your turn"
+      userHandle,
     });
     return res.data;
   },
 };
-

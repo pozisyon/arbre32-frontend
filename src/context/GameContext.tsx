@@ -1,17 +1,26 @@
-// src/context/GameContext.tsx
-import { createContext, useContext, useState, useCallback } from "react";
+import {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useEffect,
+} from "react";
+
 import { useNavigate } from "react-router-dom";
+import SockJS from "sockjs-client";
+import { Client } from "@stomp/stompjs";
+
 import { GameApi, type GameDTO } from "../api/gameApi";
-import { api } from "../api/http";
 import { useAuthStore } from "../store/authStore";
 
 interface GameContextValue {
   game: GameDTO | null;
   gameId: string | null;
+  lastError: string | null;
+
   initNewGame: (mode: 32 | 52) => Promise<void>;
   joinGame: (id: string) => Promise<void>;
   loadGame: (id: string) => Promise<void>;
-  // 🔥 plus besoin de playerId côté frontend
   play: (cardId: string) => Promise<void>;
 }
 
@@ -20,75 +29,94 @@ const GameContext = createContext<GameContextValue | undefined>(undefined);
 export function GameProvider({ children }: { children: React.ReactNode }) {
   const [game, setGame] = useState<GameDTO | null>(null);
   const [gameId, setGameId] = useState<string | null>(null);
+  const [lastError, setLastError] = useState<string | null>(null);
 
   const navigate = useNavigate();
   const { user } = useAuthStore();
 
-  // --------------------------------------------
-  // CREATE NEW GAME
-  // --------------------------------------------
-  const initNewGame = useCallback(
-    async (mode: 32 | 52) => {
-      const id = await GameApi.createGame(mode);
-      const state = await GameApi.getState(id);
+  // ---------- WEBSOCKET ----------
+  useEffect(() => {
+    if (!gameId) return;
 
-      setGameId(id);
-      setGame(state);
-      navigate(`/game/${id}`);
-    },
-    [navigate]
-  );
+    const sock = new SockJS("http://localhost:8080/ws");
+    const stomp = new Client({
+      webSocketFactory: () => sock as any,
+      reconnectDelay: 5000,
+      debug: () => {},
+    });
 
-  // --------------------------------------------
-  // LOAD GAME
-  // --------------------------------------------
+    stomp.onConnect = () => {
+      stomp.subscribe(`/topic/game/${gameId}`, (msg) => {
+        const updated = JSON.parse(msg.body);
+        setGame(updated);
+        setLastError(null);
+      });
+    };
+
+    stomp.activate();
+    return () => stomp.deactivate();
+  }, [gameId]);
+
+  // ---------- CREER UNE PARTIE ----------
+  const initNewGame = useCallback(async (mode: 32 | 52) => {
+    const state = await GameApi.createGame(mode);
+
+    // ❗ On NE rejoint PAS la partie ici
+    // ❗ On NE charge pas la partie
+    // ❗ On NE navigue pas vers /game/id
+
+    console.log("🎲 Partie créée:", state.gameId);
+
+    // Le lobby va détecter la nouvelle partie dans /api/game/open
+    setLastError(null);
+  }, []);
+
+  // ---------- CHARGER UNE PARTIE ----------
   const loadGame = useCallback(
     async (id: string) => {
       const state = await GameApi.getState(id);
       setGameId(id);
       setGame(state);
+      setLastError(null);
       navigate(`/game/${id}`);
     },
     [navigate]
   );
 
-  // --------------------------------------------
-  // JOIN GAME
-  // --------------------------------------------
+  // ---------- REJOINDRE UNE PARTIE ----------
   const joinGame = useCallback(
     async (id: string) => {
-      // on envoie encore playerId pour respecter la signature, 
-      // mais en B2 le backend s'en fiche et force "J1"/"J2"
-      await api.post(`/api/game/${id}/join`, {
-        playerId: user?.email ?? "anonymous",
-      });
+      if (!user) return;
 
-      const state = await GameApi.getState(id);
+      const state = await GameApi.joinGame(id, user.handle);
+
       setGameId(id);
       setGame(state);
+      setLastError(null);
+
       navigate(`/game/${id}`);
     },
     [navigate, user]
   );
 
-  // --------------------------------------------
-  // PLAY CARD (B2 : playerId = game.turnPlayer)
-  // --------------------------------------------
+  // ---------- JOUER ----------
   const play = useCallback(
     async (cardId: string) => {
-      if (!gameId || !game) return;
+      if (!gameId || !user) return;
 
-      const playerId = game.turnPlayer; // "J1" ou "J2" envoyé par le backend
+      try {
+        const updated = await GameApi.playCard(gameId, cardId, user.handle);
+        setGame(updated);
+        setLastError(null);
+      } catch (e: any) {
+        const status = e?.response?.status;
 
-      if (!playerId) {
-        console.error("Impossible de déterminer le joueur courant (turnPlayer null).");
-        return;
+        if (status === 403) setLastError("⚠️ Ce n'est pas votre tour.");
+        else if (status === 409) setLastError("🚫 Coup illégal.");
+        else setLastError("Erreur côté serveur.");
       }
-
-      const updated = await GameApi.playCard(gameId, cardId, playerId);
-      setGame(updated);
     },
-    [gameId, game]
+    [gameId, user]
   );
 
   return (
@@ -96,6 +124,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       value={{
         game,
         gameId,
+        lastError,
         initNewGame,
         joinGame,
         loadGame,
@@ -107,9 +136,6 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-// --------------------------------------------
-// HOOK
-// --------------------------------------------
 export function useGame() {
   const ctx = useContext(GameContext);
   if (!ctx) throw new Error("useGame must be used within GameProvider");

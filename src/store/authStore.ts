@@ -3,8 +3,11 @@ import { create } from "zustand";
 export interface User {
   id: string;
   email: string;
+  handle: string;   // 🔥 ajoute ça
   roles?: string[];
 }
+
+
 
 interface AuthState {
   user: User | null;
