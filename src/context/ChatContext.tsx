@@ -1,72 +1,57 @@
 // src/context/ChatContext.tsx
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-  useCallback,
-  useRef,
-} from "react";
-
-import SockJS from "sockjs-client";
+import { createContext, useContext, useState, useCallback, useRef } from "react";
 import { Client } from "@stomp/stompjs";
+import SockJS from "sockjs-client";
 
-interface ChatMessage {
+export interface ChatMessage {
   sender: string;
   content: string;
-  ts: number;
 }
 
 interface ChatContextValue {
   messages: ChatMessage[];
   connect: (gameId: string) => void;
-  send: (gameId: string, msg: ChatMessage) => void;
+  send: (gameId: string, body: { sender: string; content: string }) => void;
 }
 
 const ChatContext = createContext<ChatContextValue | undefined>(undefined);
 
 export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+
+  // 🔥 Ref = NE CHANGE PAS entre les renders
   const stompRef = useRef<Client | null>(null);
-  const currentGameRef = useRef<string | null>(null);
+  const connectedGameRef = useRef<string | null>(null);
 
-  // ============================
-  //  CONNECT
-  // ============================
   const connect = useCallback((gameId: string) => {
-    // ⛔ Ne pas reconnecter si déjà sur la même partie
-    if (currentGameRef.current === gameId) return;
+    // ⛔ Déjà connecté à cette salle → NE RIEN FAIRE
+    if (connectedGameRef.current === gameId) return;
 
-    currentGameRef.current = gameId;
-    setMessages([]); // reset chat pour nouvelle partie
-
-    // 🔌 Déconnecter proprement l’ancienne connexion
+    // ⛔ Si un ancien socket existe → on le coupe
     if (stompRef.current) {
       stompRef.current.deactivate();
       stompRef.current = null;
     }
 
-    // ✔️ Créer une seule connexion
-    const sock = new SockJS("http://localhost:8080/ws");
-
+    const socket = new SockJS("http://localhost:8080/ws");
     const client = new Client({
-      webSocketFactory: () => sock as any,
-      reconnectDelay: 5000,
+      webSocketFactory: () => socket as any,
       debug: () => {},
+      reconnectDelay: 3000,
     });
 
     client.onConnect = () => {
-      client.subscribe(`/topic/chat/${gameId}`, (msg) => {
-        const payload = JSON.parse(msg.body);
+      connectedGameRef.current = gameId;
 
-        setMessages((prev) => [
-          ...prev,
-          {
-            sender: payload.from,
-            content: payload.message,
-            ts: Date.now(),
-          },
-        ]);
+      client.subscribe(`/topic/chat/${gameId}`, (frame) => {
+        const body = JSON.parse(frame.body);
+
+        const msg: ChatMessage = {
+          sender: body.sender ?? body.from ?? "SYSTEM",
+          content: body.content ?? body.message ?? "",
+        };
+
+        setMessages((prev) => [...prev, msg]);
       });
     };
 
@@ -74,11 +59,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     stompRef.current = client;
   }, []);
 
-  // ============================
-  //  SEND
-  // ============================
-  const send = useCallback(async (gameId: string, msg: ChatMessage) => {
-    await fetch("http://localhost:8080/api/chat/send", {
+  const send = useCallback((gameId: string, msg: { sender: string; content: string }) => {
+    fetch("http://localhost:8080/api/chat/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -87,15 +69,6 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         message: msg.content,
       }),
     });
-  }, []);
-
-  // ============================
-  //  CLEANUP POUR REACT
-  // ============================
-  useEffect(() => {
-    return () => {
-      if (stompRef.current) stompRef.current.deactivate();
-    };
   }, []);
 
   return (
@@ -107,7 +80,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
 export function useChat() {
   const ctx = useContext(ChatContext);
-  if (!ctx) throw new Error("useChat must be used within ChatProvider");
+  if (!ctx) throw new Error("useChat must be used inside ChatProvider");
   return ctx;
 }
 
